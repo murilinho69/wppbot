@@ -1,11 +1,36 @@
-const qrcode = require('qrcode'); // para gerar QR visual
-const qrcodeTerminal = require('qrcode-terminal'); // para console
-const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
+// ✅ Código atualizado usando sessão em JSON persistente para rodar 24/7 no Render grátis
+
+const qrcodeTerminal = require('qrcode-terminal');
+const qrcode = require('qrcode');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const { Client, MessageMedia, RemoteAuth } = require('whatsapp-web.js');
+
+const SESSION_FILE = path.resolve(__dirname, 'session.json');
+
+let latestQr = null;
+
+// Carrega a sessão do JSON (se existir)
+const sessionData = fs.existsSync(SESSION_FILE)
+  ? JSON.parse(fs.readFileSync(SESSION_FILE))
+  : null;
 
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new RemoteAuth({
+    clientId: 'session',
+    store: {
+      save: (data) => {
+        fs.writeFileSync(SESSION_FILE, JSON.stringify(data));
+      },
+      load: () => {
+        if (fs.existsSync(SESSION_FILE)) {
+          return JSON.parse(fs.readFileSync(SESSION_FILE));
+        }
+        return null;
+      },
+    },
+  }),
   puppeteer: {
     headless: true,
     args: ['--no-sandbox']
@@ -14,18 +39,14 @@ const client = new Client({
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-const app = express();
-
-let latestQr = null; // variável para guardar o QR code
-
 client.on('qr', qr => {
-  latestQr = qr; // salva o QR para rota web
-  qrcodeTerminal.generate(qr, { small: true }); // imprime no terminal
+  latestQr = qr;
+  qrcodeTerminal.generate(qr, { small: true });
+  console.log('🟡 Escaneie o QR para conectar no WhatsApp...');
 });
 
 client.on('ready', () => {
   console.log('✅ Bot conectado com sucesso!');
-  latestQr = null; // limpa o QR pois já autenticou
 });
 
 client.initialize();
@@ -51,8 +72,6 @@ client.on('message', async msg => {
         'Mas antes de liberar tudo...\n' +
         'Posso confiar na sua honestidade pra enviar primeiro as receitas?\n\n' +
         'Digite Sim ou Não');
-      await chat.sendStateTyping();
-      await delay(1200);
     }
 
     if (msg.body.toLowerCase().trim() === 'sim' && msg.from.endsWith('@c.us')) {
@@ -64,8 +83,6 @@ client.on('message', async msg => {
         'As receitas são exclusivas e perfeitas para quem quer fazer recheios que não vão ao fogão.\n\n' +
         'Estou enviando agora...');
 
-      await delay(2000);
-
       const arquivos = [
         'BRIGADEIROS.pdf',
         'RECHEIO SEM FOGO 1.pdf',
@@ -76,19 +93,12 @@ client.on('message', async msg => {
 
       for (const nomeArquivo of arquivos) {
         const caminho = path.resolve(__dirname, nomeArquivo);
-        try {
-          const media = MessageMedia.fromFilePath(caminho);
-          await chat.sendStateTyping();
-          await delay(1500);
-          await client.sendMessage(msg.from, media);
-          console.log(`✅ PDF enviado: ${nomeArquivo}`);
-          await delay(2000);
-        } catch (err) {
-          console.error(`❌ Erro ao enviar ${nomeArquivo}:`, err.message);
-        }
+        const media = MessageMedia.fromFilePath(caminho);
+        await delay(1500);
+        await client.sendMessage(msg.from, media);
+        console.log(`✅ PDF enviado: ${nomeArquivo}`);
       }
 
-      await chat.sendStateTyping();
       await delay(2000);
       await client.sendMessage(msg.from,
         'Agora que recebeu, confira que está tudo certinho!\n' +
@@ -96,13 +106,7 @@ client.on('message', async msg => {
         'E não esqueça de enviar o comprovante\n\n' +
         'PIX CELULAR\nNome (Meu Filho): Caio\nValor: R$10,90\nBanco: Mercado Pago\nChave: 71991718895\n\n' +
         'Pix abaixo para copiar e colar 👇👇👇');
-
-      await chat.sendStateTyping();
-      await delay(1500);
       await client.sendMessage(msg.from, '71991718895');
-
-      await chat.sendStateTyping();
-      await delay(1500);
       await client.sendMessage(msg.from, '*BRINDE EXCLUSIVO APÓS SEU PAGAMENTO*');
 
       try {
@@ -114,47 +118,45 @@ client.on('message', async msg => {
         console.error('❌ Erro ao enviar imagem:', err.message);
       }
 
-      await delay(1500);
       await client.sendMessage(msg.from,
         'Participe do sorteio de uma batedeira todo mês, no dia 30!\n' +
         'Entregamos via correios e sem custo. Basta mandar o comprovante de pagamento das receitas e você já participará automaticamente.');
 
-      await delay(1500);
       await client.sendMessage(msg.from,
         'Fico no aguardo do seu pix 😘\n\n' +
         'PIX CELULAR\nNome (Meu Filho): Caio\nValor: R$10,90\nBanco: Mercado Pago\nChave: 71991718895');
 
-      // Enviar áudio de incentivo
       try {
         const audio = MessageMedia.fromFilePath(path.resolve(__dirname, 'audio.opus'));
         await delay(1000);
         await client.sendMessage(msg.from, audio, {
           sendAudioAsVoice: true
         });
-        console.log('✅ Áudio enviado como se fosse gravado na hora');
+        console.log('✅ Áudio enviado');
       } catch (err) {
         console.error('❌ Erro ao enviar áudio:', err.message);
       }
     }
-
   } catch (err) {
     console.error('❌ Erro no bot:', err.message);
   }
 });
 
-// Rota para mostrar o QR code no navegador
+// Servidor Express
+const app = express();
+app.get('/', (req, res) => res.send('🤖 Bot do WhatsApp está online!'));
+
 app.get('/qr', (req, res) => {
   if (!latestQr) {
-    return res.send('QR code ainda não gerado ou já autenticado, aguarde ou reinicie a sessão.');
+    return res.send('QR code ainda não disponível ou já autenticado.');
   }
+
   qrcode.toDataURL(latestQr, (err, url) => {
-    if (err) return res.status(500).send('Erro ao gerar QR code');
-    res.send(`<img src="${url}" alt="QR Code" />`);
+    if (err) return res.status(500).send('Erro ao gerar QR visual');
+    res.send(`<h2>Escaneie o QR com seu WhatsApp</h2><img src="${url}" />`);
   });
 });
 
-app.get('/', (req, res) => res.send('Bot do WhatsApp está online!'));
-
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Servidor web rodando na porta ' + (process.env.PORT || 3000));
+  console.log('🌐 Servidor web rodando na porta 3000');
 });
