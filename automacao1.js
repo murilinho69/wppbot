@@ -1,4 +1,5 @@
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode'); // para gerar QR visual
+const qrcodeTerminal = require('qrcode-terminal'); // para console
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
 const express = require('express');
@@ -13,12 +14,18 @@ const client = new Client({
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
+const app = express();
+
+let latestQr = null; // variável para guardar o QR code
+
 client.on('qr', qr => {
-  qrcode.generate(qr, { small: true });
+  latestQr = qr; // salva o QR para rota web
+  qrcodeTerminal.generate(qr, { small: true }); // imprime no terminal
 });
 
 client.on('ready', () => {
   console.log('✅ Bot conectado com sucesso!');
+  latestQr = null; // limpa o QR pois já autenticou
 });
 
 client.initialize();
@@ -135,9 +142,19 @@ client.on('message', async msg => {
   }
 });
 
-// 🔁 Servidor web para manter Render ativo
-const app = express();
+// Rota para mostrar o QR code no navegador
+app.get('/qr', (req, res) => {
+  if (!latestQr) {
+    return res.send('QR code ainda não gerado ou já autenticado, aguarde ou reinicie a sessão.');
+  }
+  qrcode.toDataURL(latestQr, (err, url) => {
+    if (err) return res.status(500).send('Erro ao gerar QR code');
+    res.send(`<img src="${url}" alt="QR Code" />`);
+  });
+});
+
 app.get('/', (req, res) => res.send('Bot do WhatsApp está online!'));
+
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Servidor web rodando na porta 3000');
+  console.log('Servidor web rodando na porta ' + (process.env.PORT || 3000));
 });
