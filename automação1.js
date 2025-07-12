@@ -1,5 +1,3 @@
-// ✅ Código atualizado usando sessão em JSON persistente para rodar 24/7 no Render grátis
-
 const qrcodeTerminal = require('qrcode-terminal');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -8,10 +6,9 @@ const express = require('express');
 const { Client, MessageMedia, RemoteAuth } = require('whatsapp-web.js');
 
 const SESSION_FILE = path.resolve(__dirname, 'session.json');
-
 let latestQr = null;
 
-// Carrega a sessão do JSON (se existir)
+// Carrega sessão
 const sessionData = fs.existsSync(SESSION_FILE)
   ? JSON.parse(fs.readFileSync(SESSION_FILE))
   : null;
@@ -144,11 +141,15 @@ client.on('message', async msg => {
 
 // Servidor Express
 const app = express();
+
 app.get('/', (req, res) => res.send('🤖 Bot do WhatsApp está online!'));
 
 app.get('/qr', (req, res) => {
   if (!latestQr) {
-    return res.send('QR code ainda não disponível ou já autenticado.');
+    return res.send(`
+      <h2>✅ Bot já conectado ao WhatsApp</h2>
+      <p>Se você quiser forçar novo QR, exclua o arquivo <code>session.json</code> e reinicie o bot.</p>
+    `);
   }
 
   qrcode.toDataURL(latestQr, (err, url) => {
