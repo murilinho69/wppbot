@@ -1,33 +1,9 @@
-const qrcodeTerminal = require('qrcode-terminal');
-const qrcode = require('qrcode');
-const fs = require('fs');
+const qrcode = require('qrcode-terminal');
+const { Client, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
 const express = require('express');
-const { Client, MessageMedia, RemoteAuth } = require('whatsapp-web.js');
-
-const SESSION_FILE = path.resolve(__dirname, 'session.json');
-let latestQr = null;
-
-// Carrega sessão
-const sessionData = fs.existsSync(SESSION_FILE)
-  ? JSON.parse(fs.readFileSync(SESSION_FILE))
-  : null;
 
 const client = new Client({
-  authStrategy: new RemoteAuth({
-    clientId: 'session',
-    store: {
-      save: (data) => {
-        fs.writeFileSync(SESSION_FILE, JSON.stringify(data));
-      },
-      load: () => {
-        if (fs.existsSync(SESSION_FILE)) {
-          return JSON.parse(fs.readFileSync(SESSION_FILE));
-        }
-        return null;
-      },
-    },
-  }),
   puppeteer: {
     headless: true,
     args: ['--no-sandbox']
@@ -37,9 +13,7 @@ const client = new Client({
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 client.on('qr', qr => {
-  latestQr = qr;
-  qrcodeTerminal.generate(qr, { small: true });
-  console.log('🟡 Escaneie o QR para conectar no WhatsApp...');
+  qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
@@ -69,6 +43,8 @@ client.on('message', async msg => {
         'Mas antes de liberar tudo...\n' +
         'Posso confiar na sua honestidade pra enviar primeiro as receitas?\n\n' +
         'Digite Sim ou Não');
+      await chat.sendStateTyping();
+      await delay(500);
     }
 
     if (msg.body.toLowerCase().trim() === 'sim' && msg.from.endsWith('@c.us')) {
@@ -80,6 +56,8 @@ client.on('message', async msg => {
         'As receitas são exclusivas e perfeitas para quem quer fazer recheios que não vão ao fogão.\n\n' +
         'Estou enviando agora...');
 
+      await delay(1200);
+
       const arquivos = [
         'BRIGADEIROS.pdf',
         'RECHEIO SEM FOGO 1.pdf',
@@ -90,74 +68,66 @@ client.on('message', async msg => {
 
       for (const nomeArquivo of arquivos) {
         const caminho = path.resolve(__dirname, nomeArquivo);
-        const media = MessageMedia.fromFilePath(caminho);
-        await delay(1500);
-        await client.sendMessage(msg.from, media);
-        console.log(`✅ PDF enviado: ${nomeArquivo}`);
+        try {
+          const media = MessageMedia.fromFilePath(caminho);
+          await chat.sendStateTyping();
+          await delay(800);
+          await client.sendMessage(msg.from, media);
+          console.log(`✅ PDF enviado: ${nomeArquivo}`);
+          await delay(1500);
+        } catch (err) {
+          console.error(`❌ Erro ao enviar ${nomeArquivo}:`, err.message);
+        }
       }
 
-      await delay(2000);
+      await chat.sendStateTyping();
+      await delay(1500);
       await client.sendMessage(msg.from,
         'Agora que recebeu, confira que está tudo certinho!\n' +
         'Fico aguardando seu pagamento...\n' +
         'E não esqueça de enviar o comprovante\n\n' +
         'PIX CELULAR\nNome (Meu Filho): Caio\nValor: R$10,90\nBanco: Mercado Pago\nChave: 71991718895\n\n' +
         'Pix abaixo para copiar e colar 👇👇👇');
+
+      await chat.sendStateTyping();
+      await delay(1200);
       await client.sendMessage(msg.from, '71991718895');
+
+      await chat.sendStateTyping();
+      await delay(1200);
       await client.sendMessage(msg.from, '*BRINDE EXCLUSIVO APÓS SEU PAGAMENTO*');
 
+      await chat.sendStateTyping();
+      await delay(1500);
       try {
         const imagem = MessageMedia.fromFilePath(path.resolve(__dirname, 'Capturar.PNG'));
-        await delay(1000);
         await client.sendMessage(msg.from, imagem);
         console.log('✅ Imagem enviada');
       } catch (err) {
         console.error('❌ Erro ao enviar imagem:', err.message);
       }
 
+      await chat.sendStateTyping();
+      await delay(1500);
       await client.sendMessage(msg.from,
         'Participe do sorteio de uma batedeira todo mês, no dia 30!\n' +
         'Entregamos via correios e sem custo. Basta mandar o comprovante de pagamento das receitas e você já participará automaticamente.');
 
+      await chat.sendStateTyping();
+      await delay(1500);
       await client.sendMessage(msg.from,
         'Fico no aguardo do seu pix 😘\n\n' +
         'PIX CELULAR\nNome (Meu Filho): Caio\nValor: R$10,90\nBanco: Mercado Pago\nChave: 71991718895');
-
-      try {
-        const audio = MessageMedia.fromFilePath(path.resolve(__dirname, 'audio.opus'));
-        await delay(1000);
-        await client.sendMessage(msg.from, audio, {
-          sendAudioAsVoice: true
-        });
-        console.log('✅ Áudio enviado');
-      } catch (err) {
-        console.error('❌ Erro ao enviar áudio:', err.message);
-      }
     }
+
   } catch (err) {
     console.error('❌ Erro no bot:', err.message);
   }
 });
 
-// Servidor Express
+// 🔁 Servidor web para manter ativo
 const app = express();
-
-app.get('/', (req, res) => res.send('🤖 Bot do WhatsApp está online!'));
-
-app.get('/qr', (req, res) => {
-  if (!latestQr) {
-    return res.send(`
-      <h2>✅ Bot já conectado ao WhatsApp</h2>
-      <p>Se você quiser forçar novo QR, exclua o arquivo <code>session.json</code> e reinicie o bot.</p>
-    `);
-  }
-
-  qrcode.toDataURL(latestQr, (err, url) => {
-    if (err) return res.status(500).send('Erro ao gerar QR visual');
-    res.send(`<h2>Escaneie o QR com seu WhatsApp</h2><img src="${url}" />`);
-  });
-});
-
+app.get('/', (req, res) => res.send('Bot do WhatsApp está online!'));
 app.listen(process.env.PORT || 3000, () => {
-  console.log('🌐 Servidor web rodando na porta 3000');
+  console.log('Servidor web rodando na porta 3000');
 });
